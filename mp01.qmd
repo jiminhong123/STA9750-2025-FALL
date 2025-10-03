@@ -16,6 +16,12 @@ excute:
   message: false 
   echo: true
 ---
+## Inroduction 
+In the highly competitive OTT platform, Netflix's strategy hinges on producing *gourment cheeseburgers* - high quality original content with mass market glbal appeal. The ultimate measure of its strategy success likes in viewership data. As a data analyst supporting the PR team, the primary objective of this report is to mine Netflix's publicy available Top 10 data to identify, quantify, and contextualize recent content successes. The insights gathered will form the data foundation for a series of press releases aimed at highlighting these achievements. 
+
+This analysis based own two datasets: global_top10_alltime.csv and country_top10_alltime.csv. Using analytical from R with dplyr package. We will explore key performance indicators such as a program's global reach, its longevity on the charts, and unique regional popularity trends. 
+
+***
 # Data Acquisition
 ```{r}
 #Data Acquisition
@@ -86,6 +92,9 @@ GLOBAL_TOP_10 |>
     datatable(options=list(searching=FALSE, info=FALSE)) |>
     formatRound(c('Weekly Hours Viewed', 'Weekly Views'))
 ```
+
+
+***
 
 # Netflix Top 10 EDA 
 
@@ -256,6 +265,7 @@ q10_countries <- q10_debut$countries
 ```
 The TV show/season that hit the top 10 in the most countries in its debut week is **`r q10_show_title`**.
 
+***
 
 
 # Press release
@@ -347,3 +357,10 @@ num_countries_at_no1 <- length(kpop_demon_hunters_stats$countries_at_no1[[1]])
 ## From Korea to the World Stage: *K-Pop Demon Hunters* Conquers the #1 Spot in `r num_countries_at_no1`countries
 
 Netflix has highlighted the global appeal of Korea's K-Pop culture with the unprecedented success of its latest original animation, *K-Pop Demon Hunters*. It has surpassed the toal viewer ship of all *Squid Game* seasons combined, recording **559.1 million** views. The content also topped the charts in 76 countries, proving the worldwide pull of Korean culture. 
+
+***
+## Conclusion 
+
+The analysis proves that Netflix's *gourmet cheeseburger* strategy is working effectively. Its service footprint, now spanning over 90 countries, is more than just a quantitative expansion; it has become a foundation where region-specific content can achieve its own success. (like India case) and even evolve into a global phenomenon like **Squid Game**. Moreover, the enduring power of major series like **Stranger Things** to maintain long term popularity across over the countries.
+
+As the streaming market becomes increasingly competitive, Netflix's data-driven approach of targeting both universal appeal and local specificity will be crucial in maintaining its market leadership. 
