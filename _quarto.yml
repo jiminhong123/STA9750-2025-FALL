@@ -14,7 +14,7 @@ website:
 format:
   html:
     theme: default
-    toc: false
+    toc: true
 
 editor:
   mode: source
