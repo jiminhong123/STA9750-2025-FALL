@@ -11,7 +11,7 @@ format:
     code-summary: "Show code"
     embed-resources: true
 editor: visual
-excute:
+execute:
   warning: false
   message: false 
   echo: true
