@@ -1,0 +1,671 @@
+---
+title: "Mini Project #03 – Visualizing and Maintaining the Green Canopy of NYC"
+author: "Jimin Hong"
+date: "`r Sys.Date()`"
+format:
+  html:
+    theme: default
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+  echo: true
+---
+
+## Introduction 
+![This is a green jpg](green.jpg)
+New York City's street trees are vital for public health, easing urban heat, and improving quality of life. However this green canopy requires maintenance, and data can show us where to fucus our efforts. 
+
+This project uses data analysis to find the areas of greatest need. We acquired and analyzed two key datasets : **NYC Council District boundaries** and the **NYC Tree Points database**
+
+## Data Acquisition
+
+### Task 1: Download NYC Council District Boundaries 
+
+```{r}
+# 1. Load required packages
+suppressPackageStartupMessages({
+  library(sf)
+  library(fs) 
+})
+
+
+NYC_City_Council <- function(url) {
+  
+  # 1. Set up and create the 'data/mp03' directory
+  mp03 <- path("data", "mp03")
+  if (!dir_exists(mp03)) {
+    dir_create(mp03, recurse = TRUE)
+    cat("✓ Created 'data/mp03' directory\n")
+  }
+
+  # 2. Set zip file path and download if needed
+  zip_path <- path(mp03, path_file(url))
+  
+  if (!file_exists(zip_path)) {
+    cat("Downloading zip file...\n")
+    # Use base R download.file
+    download.file(url,
+                  destfile = zip_path,
+                  mode = "wb") 
+    cat("✓ Download complete\n")
+  } else {
+    cat("✓ Zip file already exists.\n")
+  }
+
+  # 3. Unzip if needed
+  shp_files <- dir_ls(mp03, glob = "*.shp", recurse = TRUE)
+  
+  if (length(shp_files) == 0) {
+    cat("Unzipping file...\n")
+    # Use base R unzip
+    unzip(zip_path, exdir = mp03)
+    # Find the .shp file again after unzipping
+    shp_files <- dir_ls(mp03, glob = "*.shp")
+    cat("✓ Unzip complete\n")
+  } else {
+    cat("✓ '.shp' file already exists. (Skipping unzip)\n")
+  }
+
+  # 4. Read and transform the shapefile
+  cat("Reading shapefile...\n")
+  NYC_file <- st_read(shp_files[1], quiet = TRUE) 
+  
+  cat("Transforming CRS to WGS84...\n")
+  NYC_file <- st_transform(NYC_file, crs = "WGS84")
+  
+  cat("✓ Data ready.\n")
+  return(NYC_file)
+}
+```
+
+```{r}
+correct_url <- "https://s-media.nyc.gov/agencies/dcp/assets/files/zip/data-tools/bytes/city-council/nycc_25c.zip"
+council <- NYC_City_Council(correct_url)
+
+council 
+
+```
+
+```{r}
+library(dplyr)
+# Simplify district boundaries 
+
+council_simple <- council %>%
+  mutate(geometry = st_simplify(geometry, dTolerance = 5))
+
+
+plot(st_geometry(council_simple), main = "Simplified NYC Council Districts (5m tolerance)")
+
+```
+
+After loading and visualizing the data, We confirmed that there are **51 NYC Councils Districts** 
+
+### Task 2: Download Tree Points
+
+```{r}
+library(httr2)
+library(dplyr)
+
+get_tree_points <- function(base_url,
+                            out_dir = "data/mp03",
+                            limit = 40000,
+                            overwrite = FALSE) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+
+  i <- 0L
+  repeat {
+    offset   <- i * limit
+    out_file <- file.path(out_dir, sprintf("treepoints_p%05d.geojson", i))
+
+    if (!file.exists(out_file) || overwrite) {
+      resp <- request(base_url) |>
+        req_url_query(`$limit` = limit, `$offset` = offset, `$order` = ":id") |>
+        req_perform()
+      writeBin(resp_body_raw(resp), out_file)
+    }
+
+   
+    got_n <- tryCatch(
+      nrow(suppressMessages(st_read(out_file, quiet = TRUE))),
+      error = function(e) 0L
+    )
+    if (got_n < limit) break
+
+    i <- i + 1L
+  }
+
+
+  files <- list.files(out_dir, "^treepoints_p\\d{5}\\.geojson$", full.names = TRUE)
+  if (length(files) == 0) stop(" No file.")
+
+  lst <- vector("list", length(files))
+  for (k in seq_along(files)) {
+    lst[[k]] <- suppressMessages(st_read(files[k], quiet = TRUE))
+  }
+
+  geom_col <- attr(lst[[1]], "sf_column"); if (is.null(geom_col)) geom_col <- "geometry"
+  crs0 <- st_crs(lst[[1]])
+  combined_tbl <- bind_rows(lst)
+  st_as_sf(combined_tbl, sf_column_name = geom_col, crs = crs0)
+}
+
+base_url <- "https://data.cityofnewyork.us/resource/hn5i-inap.geojson"
+trees_sf <- get_tree_points(base_url)  
+nrow(trees_sf); st_crs(trees_sf)
+
+```
+
+### Task 3: Mapping NYC Trees
+
+```{r}
+library(leaflet)
+
+trees_for_map <- trees_sf %>%
+  mutate(
+    simple_status = case_when(
+      tpstructure == 'Stump' ~ "Stump",
+      tpcondition == 'Dead'  ~ "Dead",
+      TRUE                     ~ "Alive" # Group "Good", "Poor", "Fair" as "Alive"
+    )
+  )
+
+# Create the Color Palette
+
+pal <- colorFactor(
+  palette = c("green", "grey", "red"),
+  domain = c("Alive", "Stump", "Dead")
+)
+
+# Build the Interactive Map 
+leaflet(data = trees_for_map) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    data = council_simple, 
+    fill = NA,             
+    color = "black",       
+    weight = 1             
+  ) %>%
+  
+ 
+  addCircleMarkers(
+    radius = 2,
+    color = ~pal(simple_status),
+    stroke = FALSE,              
+    fillOpacity = 0.7,
+    # This is the most important part for matching the image:
+    clusterOptions = markerClusterOptions() 
+  ) %>%
+  
+  # Add the legend
+  addLegend(
+    pal = pal,
+    values = ~simple_status, 
+    title = "Tree Status",
+    position = "topright"
+  )
+
+
+```
+
+
+### Task 4 : District-Level Analysis of Tree Coverage 
+
+**Q1. Which council district has the most trees?** 
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Count trees within each district 
+council_tree_counts <- council_simple %>%
+  mutate(
+
+    tree_count = lengths(st_intersects(geometry, trees_sf))
+  )
+
+
+top_district <- council_tree_counts %>%
+  arrange(desc(tree_count)) %>%
+  slice(1)
+
+# 4. visualize
+ggplot(data = council_tree_counts) +
+  
+  geom_sf(aes(fill = tree_count), color = "white", size = 0.2) +
+  
+ 
+  scale_fill_viridis_c(option = "magma", direction = -1, 
+                       name = "Tree Count",
+                       labels = scales::comma) +
+  
+  theme_void() + 
+  labs(
+    title = "Density of Trees by NYC Council District",
+    subtitle = paste("District", top_district$CounDist, "has the most trees")
+  )
+
+```
+
+🌳 District 51(Staten Island) has 70,927 trees
+
+**Q2. Which council district has the highest density of trees?** 
+
+🌳 District 7 (Manhattan) has the highest density of trees
+
+This code calculates the tree density (`tree_count` divided by `Shape_Area`) and displays the result in an interactive table.
+
+```{r}
+library(dplyr)
+library(sf)
+library(DT) 
+
+# Calculate density and clean up
+density_data <- council_tree_counts %>%
+  st_drop_geometry() %>% 
+  mutate(
+    tree_density = tree_count / Shape_Area 
+  ) %>%
+  select(CounDist, tree_count, Shape_Area, tree_density) %>% # Select relevant columns
+  arrange(desc(tree_density)) # Sort by density in descending order (highest density at the top)
+
+# Create an interactive table using DT
+datatable(density_data,
+          rownames = FALSE, 
+          colnames = c("District ID", "Total Trees", "Area (sq ft)", "Tree Density"),
+          options = list(pageLength = 10, scrollX = TRUE)) %>%
+
+  formatCurrency(columns = c("tree_count", "Shape_Area"), currency = "", interval = 3, mark = ",", digits = 0) %>%
+ 
+  formatRound(columns = "tree_density", digits = 8)
+
+```
+
+
+
+**Q3.Which district has highest fraction of dead trees out of all trees?**
+
+🌳 District 32 & 30  (Queens) has the highest fraction of dead trees out of all trees. 
+
+```{r}
+
+library(dplyr)
+library(sf)
+library(DT)
+
+# Filter for Dead Trees
+
+dead_trees_sf <- trees_sf %>%
+  filter(tpcondition == 'Dead' | tpstructure == 'Stump')
+
+cat(paste("Total trees (all statuses):", nrow(trees_sf), "\n"))
+cat(paste("Total dead or stump trees:", nrow(dead_trees_sf), "\n"))
+
+
+# Calculate Fractions per District
+
+if (st_crs(council_tree_counts) != st_crs(dead_trees_sf)) {
+  council_tree_counts <- st_transform(council_tree_counts, st_crs(dead_trees_sf))
+}
+
+council_fractions <- council_tree_counts %>%
+  mutate(
+    dead_tree_count = lengths(st_intersects(geometry, dead_trees_sf)),
+    dead_tree_fraction = ifelse(tree_count == 0, 0, dead_tree_count / tree_count)
+  )
+
+
+# Find the Highest Fraction and Display Table 
+fraction_table_data <- council_fractions %>%
+  st_drop_geometry() %>%
+  select(CounDist, tree_count, dead_tree_count, dead_tree_fraction) %>%
+  arrange(desc(dead_tree_fraction))
+
+top_fraction_dist <- fraction_table_data[1, ]
+
+cat(paste("\nDistrict", top_fraction_dist$CounDist, 
+          "has the highest fraction of dead trees.\n"))
+
+
+
+# Display 
+datatable(fraction_table_data,
+          rownames = FALSE,
+          colnames = c("District ID", "Total Trees", "Dead Trees", "Fraction Dead"),
+          options = list(pageLength = 10)) %>%
+  formatPercentage(columns = "dead_tree_fraction", digits = 2) %>%
+  formatCurrency(columns = c("tree_count", "dead_tree_count"), currency = "", interval = 3, mark = ",", digits = 0)
+
+```
+
+
+**Q4. What is the most common tree species in Manhattan?**
+
+🌳 The most common tree species in Manhattan is the `Thornless honeylocust` (Gleditsia triacanthos var. inermis - Thornless honeylocust), with a total of `17,311 trees.`
+
+> **Note: Creating the `borough` column**
+>
+> To answer this question, a `borough` column was first added to the tree data. This was done by using `case_when()` to assign a borough name (e.g., "Manhattan" for districts 1-10) based on each tree's council district (`CounDist`), following the logic provided in the assignment.
+
+
+```{r}
+
+# Perform Spatial Join (tree points + council district polygons)
+
+council_districts_only <- select(council_tree_counts, CounDist)
+
+# Ensure CRS matches before joining
+if (st_crs(trees_sf) != st_crs(council_districts_only)) {
+  trees_sf <- st_transform(trees_sf, st_crs(council_districts_only))
+}
+
+# Perform the join
+trees_with_districts <- st_join(trees_sf, council_districts_only, join = st_intersects)
+
+cat("✓ Spatial join complete.\n")
+
+
+# Find Most Common Species in Manhattan 
+
+manhattan_species_counts <- trees_with_districts %>%
+  
+  # Create the 'borough' column 
+  mutate(
+    CounDist_num = as.numeric(CounDist), 
+    borough = case_when(
+      CounDist_num >= 1  & CounDist_num <= 10 ~ "Manhattan",
+      CounDist_num >= 11 & CounDist_num <= 18 ~ "Bronx",
+      CounDist_num >= 19 & CounDist_num <= 32 ~ "Queens",
+      CounDist_num >= 33 & CounDist_num <= 48 ~ "Brooklyn",
+      CounDist_num >= 49 & CounDist_num <= 51 ~ "Staten Island",
+      TRUE ~ "Other/Unknown" 
+    )
+  ) %>%
+  
+  # Filter for Manhattan only
+  filter(borough == "Manhattan") %>%
+  
+  st_drop_geometry() %>%
+  count(genusspecies, sort = TRUE)
+
+
+# Display
+
+top_species <- manhattan_species_counts[1, ]
+cat(paste("\nThe most common tree species in Manhattan is:", 
+          top_species$genusspecies, 
+          "with", 
+          format(top_species$n, big.mark = ","), 
+          "trees.\n"))
+
+# Show the Top 10 in an interactive table
+datatable(head(manhattan_species_counts, 10),
+          colnames = c("Species Name (genusspecies)", "Total Count"),
+          rownames = FALSE,
+          options = list(pageLength = 10))
+```
+
+
+**Q5. What is the species of the tree closest to Baruch’s campus?**
+
+> **Process Note: Finding the Closest Tree** 
+
+>This requires three main steps:
+
+>1.Find the latitude and longitude of Baruch College.
+
+>2.Use the new_st_point function to create a spatial point for Baruch.
+
+>3.Use st_distance to calculate the distance from every tree in trees_sf to that point, then find the one with the minimum distance.
+
+>Based on my search, the coordinates for Baruch College (55 Lexington Ave) are `lat = 40.740977` and `lon = -73.984252.`
+
+```{r}
+
+# Use the provided function to create a point
+new_st_point <- function(lat, lon, ...){
+    st_sfc(point = st_point(c(lon, lat))) |>
+      st_set_crs("WGS84")
+}
+
+# Define Baruch's coordinates
+baruch_lat <- 40.740977
+baruch_lon <- -73.984252
+
+# Create the Baruch spatial point object
+baruch_point <- new_st_point(lat = baruch_lat, lon = baruch_lon)
+
+# Ensure trees_sf is in the same CRS (WGS84)
+
+trees_sf_wgs84 <- trees_sf %>%
+  st_transform(crs = "WGS84")
+
+# Find the closest tree
+cat("Calculating distances from all trees to Baruch...\n")
+
+closest_tree <- trees_sf_wgs84 %>%
+  # Create the new 'distance' column
+  mutate(distance = st_distance(geometry, baruch_point)) %>%
+  
+  # Sort by distance (ascending)
+  arrange(distance) %>%
+  
+  # Get the top row 
+  slice(1)
+
+# Get the species name and distance
+closest_species <- closest_tree$genusspecies
+closest_dist_meters <- as.numeric(closest_tree$distance) # Get a clean number
+
+# Print the final answer
+cat(paste0("🌳The tree closest to Baruch College is a '", 
+           closest_species, 
+           "'.\n"))
+cat(paste0("It is approximately ", 
+           round(closest_dist_meters, 2), 
+           " meters away.\n"))
+```
+
+
+### Task 5: NYC Parks Proposal
+
+## 🌳 NYC Parks Proposal – District 32  ## 
+
+
+**Suggested by:** Staff Member of the City Council, District 32
+**Purpose:** Request additional funding for a district-level tree planting and stump-replacement program. 
+
+---
+
+### 1. Proejct Overview
+
+District 32, which includesRockaway Peninsula, Howard Beach, and parts of South Queens, faces some of the most severe street-tree challenges in Manhattan. Many blocks have aging or unhealthy trees. 
+
+I recommend launching a targeted program to **plant more street trees, replace residual stumps** and **prioritize high-need sidewalk segments that currently lack any tree presence.**
+
+
+### 2. Quantitative Scope
+
+Total Trees in District 32: 30,283
+
+Total Dead or Stump Trees: 4,491
+
+This proposal requests funding for:
+
+4,491 dead tree and stump removals
+
+4,500 new, salt-tolerant, and resilient tree plantings to replace what was lost and expand our canopy.
+
+### 3. Why District 32? 
+
+District 32 needs an emergency intervention. Our district has the highest fraction of dead or stump trees in the entire city, at 14.8%.
+
+This is not a minor issue; it is a statistical outlier that signals a critical failure in our green infrastructure. This rate is significantly higher than other districts, highlighting District 32 as the top priority for a restoration project. 
+
+
+```{r}
+library(ggplot2)
+library(scales)
+
+# --- Comparison Chart Data (D32, D26, D51, D10) 
+comparison_data <- fraction_table_data %>%
+  filter(CounDist %in% c(32, 26, 51, 10)) %>%
+  mutate(
+    CounDist = factor(CounDist, levels = c(32, 26, 10, 51)),
+    label_text = percent(dead_tree_fraction, accuracy = 0.1)
+  )
+
+# Create a bar chart
+ggplot(comparison_data, aes(x = CounDist, y = dead_tree_fraction, fill = (CounDist == 32))) +
+  geom_col() +
+  geom_text(aes(label = label_text), vjust = -0.5, size = 3.5) +
+  
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("gray", "red"), guide = "none") +
+  theme_minimal() +
+  labs(
+    title = "Why District 32? The Highest Dead Tree Rate in NYC.",
+    x = "Council District",
+    y = "Fraction of Trees Dead/Stump"
+  )
+  
+```
+
+
+
+```{r}
+library(dplyr)
+library(sf)
+library(leaflet) 
+
+
+dist_32_boundary <- council_simple %>% 
+  filter(CounDist == 32)
+
+
+if (st_crs(dead_trees_sf) != st_crs(dist_32_boundary)) {
+  dead_trees_sf <- st_transform(dead_trees_sf, st_crs(dist_32_boundary))
+}
+
+dist_32_dead_trees <- dead_trees_sf %>% 
+  st_filter(dist_32_boundary)
+
+
+dist_32_dead_trees <- dist_32_dead_trees %>%
+  mutate(
+    popup_info = paste0(
+      "<b>Species:</b> ", genusspecies, "<br>",
+      "<b>Condition:</b> ", tpcondition, "<br>",
+      "<b>Structure:</b> ", tpstructure
+    )
+  )
+
+
+leaflet(data = dist_32_dead_trees) %>%
+  
+  
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  
+  
+  addPolygons(
+    data = dist_32_boundary,
+    fillColor = "transparent", 
+    color = "black",         
+    weight = 2,              
+    opacity = 1               
+  ) %>%
+  
+  
+  addCircleMarkers(
+    radius = 5,
+    color = "darkred",
+    fillColor = "red",
+    fillOpacity = 0.6,
+    weight = 1,
+    stroke = TRUE,
+    popup = ~popup_info,                
+    clusterOptions = markerClusterOptions() 
+  ) %>%
+  
+  fitBounds(
+    lng1 = min(st_coordinates(dist_32_boundary)[,1]),
+    lat1 = min(st_coordinates(dist_32_boundary)[,2]),
+    lng2 = max(st_coordinates(dist_32_boundary)[,1]),
+    lat2 = max(st_coordinates(dist_32_boundary)[,2])
+  ) %>%
+  
+
+  addControl(
+    html = paste0("<h3>Hazardous Trees in District 32</h3>",
+                  "<p>All ", nrow(dist_32_dead_trees), " 'Dead' or 'Stump' locations</p>"),
+    position = "topleft"
+  )
+  
+
+```
+
+
+This map shows the distict 32 has **4,491** hazarouous trees. The problem is widespread. These trees are not concetrated in one park or one neighborhood. Instead they are scattered across the entire distict, from the Rockaway Peninsula to Howard Beach. This means that every community in District 32 is exposed to public-safety risks. 
+
+### 4. Proejct Benefits
+
+**1. Immediate Public Safety & Risk Reduction** 
+- Clear obstructed sidewalks, improving accessibility for all residents. 
+  
+**2. Long-term Restoration and Resilience**
+- Restores the Green Canopy: By planting 4,500 new trees, we are not just replacing what was lost but expanding the canopy for the future.
+
+- Improves Quality of Life: A renewed green canopy will improve air quality, provide critical shade to combat urban heat, manage stormwater, and restore community pride and property values for decades to come
+
+
+```{r}
+library(ggtext)
+
+stacked_scope_data <- data.frame(
+  Project = "District 32",
+  Action = c("Remove Dead/Stumps", "Plant New Trees"),
+  Count = c(4491, 4500)
+)
+
+ggplot(stacked_scope_data, 
+       aes(x = Project, y = Count, fill = Action)) +
+  
+  geom_col(color = "black", size = 0.2) +
+  
+  geom_text(
+    aes(label = format(Count, big.mark = ",")), 
+    position = position_stack(vjust = 0.5), 
+    size = 5,
+    fontface = "bold",
+    color = "white"
+  ) +
+  
+  scale_fill_manual(
+    values = c("darkgreen", "red"),
+    breaks = c("Plant New Trees", "Remove Dead/Stumps")
+  ) +
+  
+  scale_y_continuous(labels = comma_format()) +
+  
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Proposed Project Scope for District 32",
+    subtitle = "Total trees impacted by the project",
+    x = NULL,
+    y = "Number of Trees",
+    fill = "Project Action"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18, hjust = 0.5),
+    plot.subtitle = element_text(size = 14, hjust = 0.5),
+    axis.text.x = element_text(face = "bold", size = 12),
+    axis.title.y = element_text(face = "bold"),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
