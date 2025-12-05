@@ -1,0 +1,556 @@
+---
+title: "Mini Project #04 – Just the Fact(-Check)s, Ma’am!"
+author: "Jimin Hong"
+date: today
+format:
+  html:
+    theme: default
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+  echo: true
+---
+
+## Introduction 
+
+![](intro.png){width=600px}
+
+On August 1, 2025, President Donald Trump dismissed Dr. Erika McEntarfer, the Commissioner of Labor Statistics, after alleging that the recent BLS job report was **‘rigged’** because the numbers came in lower than expected. Politicians 
+and political analyst consider this report as one of the most important indicators of the overall state of the economy. 
+
+For this project, I will investigate recent pattern in BLS CES estimates and revisions, with an eye to evaluating the truth of the President’s claimed rationale for firing Dr. McEntarfer. 
+
+In this project, I will gather data from the web , clean and structure it, join tables, then visualize key patterns and conduct statistical inference to draw meaningful conclusions. 
+
+## Data Acquisition
+
+### Task 1: Download CES Total Nonfarm Payroll
+
+```{r}
+
+library(httr2)
+library(rvest)
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(readr)
+library(DT)
+
+bls_url <- "https://data.bls.gov/pdq/SurveyOutputServlet"
+
+req <- request(bls_url) |>
+  req_method("POST") |>
+  req_body_form(
+    request_action    = "get_data",
+    reformat          = "true",
+    from_results_page = "true",
+    years_option      = "specific_years",
+    delimiter         = "comma",
+    output_type       = "column",
+    periods_option    = "all_periods",
+    output_view       = "data",
+    from_year         = "1979",
+    to_year           = "2025",
+    initial_request   = "false",
+    data_tool         = "surveymost",
+    output_format     = "html",
+    series_id         = "CES0000000001"
+  )
+
+resp <- req_perform(req)
+page_html <- resp_body_html(resp)
+
+tbl <- page_html |>
+  html_element("table.regular-data") |>
+  html_table()
+
+ces_clean <- tbl |>
+  filter(Year >= 1979, Year <= 2025) |>
+  mutate(
+    month_num = case_when(
+      str_detect(Period, "^[A-Za-z]{3}$") ~ match(Period, month.abb),
+      str_detect(Period, "^M\\d{2}$") ~ as.integer(str_sub(Period, 2, 3)),
+      TRUE ~ NA_integer_
+    ),
+    date = make_date(year = Year, month = month_num, day = 1),
+    level = parse_number(Value)
+  ) |>
+  filter(!is.na(date)) |>
+  filter(
+    date >= as.Date("1979-01-01"),
+    date <= as.Date("2025-06-01")
+  ) |>
+  select(date, level) |>
+  arrange(date)
+
+datatable(ces_clean,
+          options = list(
+            pageLength = 10,
+            autoWidth = TRUE
+          ))
+
+```
+
+### Task 2: Download CES Revisions Tables
+
+```{r}
+library(httr2)
+library(rvest)
+library(purrr)
+
+rev_html <- request("https://www.bls.gov/web/empsit/cesnaicsrev.htm") |>
+  req_headers(
+    "User-Agent"      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Referer"         = "https://www.google.com/",
+    "Accept-Language" = "en-US,en;q=0.9",
+    "Accept"          = "text/html,application/xhtml+xml"
+  ) |>
+  req_perform() |>
+  resp_body_html()
+
+raw_tbls <- rev_html |>
+  html_elements("table") |>
+  html_table(header = FALSE, fill = TRUE)
+
+find_first_year_tbl <- function(tbl) {
+  if(ncol(tbl) < 2) return(FALSE)
+  any(str_detect(tbl[[2]], "^1979$"))
+}
+
+start_idx <- which(map_lgl(raw_tbls, find_first_year_tbl))[1]
+
+yearly_tables <- raw_tbls[start_idx:(start_idx + 46)]
+
+clean_revision_year <- function(df) {
+  df12 <- df |>
+    filter(str_detect(X2, "^\\d{4}$")) |>
+    slice(1:12)
+
+  df12 |>
+    mutate(
+      month_abb = str_sub(X1, 1, 3),
+      date = ym(str_c(X2, " ", month_abb)),
+      original = parse_number(X3),
+      final = parse_number(X5),
+      revision = final - original
+    ) |>
+    select(date, original, final, revision)
+}
+
+ces_revisions <- yearly_tables |>
+  map_dfr(clean_revision_year) |>
+  filter(
+    date >= as.Date("1979-01-01"),
+    date <= as.Date("2025-06-01")
+  ) |>
+  arrange(date)
+
+```
+
+```{r}
+library(DT)
+
+datatable(
+  ces_revisions,
+  options = list(
+    pageLength = 10,
+    autoWidth = TRUE
+  )
+)
+```
+
+## Data Integration and Exploration 
+
+### Task 3 : Data Exploration and Visualization 
+
+***Merge CES with CES revisions***
+
+```{r}
+
+ces_all <- left_join(ces_revisions, ces_clean, by = "date")
+
+```
+
+***Largest Positive Revision***
+```{r}
+
+library(DT)
+library(ggplot2)
+
+largest_pos <- ces_all |> 
+  slice_max(revision, n = 1) |>
+  mutate(
+    revision = round(revision, 3),
+    original = round(original, 3),
+    final    = round(final, 3),
+    level    = round(level, 3)
+  )
+
+
+datatable(
+  largest_pos,
+  caption = "Largest Positive CES Revision",
+  options = list(pageLength = 5)
+)
+
+
+```
+
+
+➡️ For November 2021, the initially reported figure was ***210***, but the final estimate was revised up to ***647***, resulting in the largest positive revision of ***+437***.
+
+***Largest Negative Revision***
+
+```{r}
+library(ggplot2)
+largest_neg <- ces_all |> 
+  slice_min(revision, n = 1)
+
+datatable(
+  largest_neg,
+  caption = "Largest Negative CES Revision",
+  options = list(pageLength = 5)
+)
+ 
+```
+
+
+➡️ For March 2020, the initial estimate was***–701***, but the final figure was revised downward to ***–1373***, producing the largest negative revision of –672.
+
+
+***Positive Revision Fraction by Year***
+
+
+```{r}
+
+positive_by_year <- ces_all |>
+  mutate(year = year(date)) |>
+  group_by(year) |>
+  summarise(positive_fraction = round(mean(revision > 0), 3))
+
+datatable(
+  positive_by_year,
+  caption = "Positive Revision Fraction by Year",
+  options = list(pageLength = 10, autoWidth = TRUE)
+)
+
+```
+➡️ The table shows how often revisions were positive each year. For instance, ***41.7%*** were upward in ***1979***, compared to ***75% in 1980***.
+
+
+***Positive Revision Fraction by Decade***
+
+```{r}
+
+positive_by_decade <- ces_all |>
+  mutate(decade = floor(year(date) / 10) * 10) |>
+  group_by(decade) |>
+   summarise(positive_fraction = round(mean(revision > 0), 3))
+
+datatable(
+  positive_by_decade,
+  caption = "Positive Revision Fraction by Decade",
+  options = list(pageLength = 10, autoWidth = TRUE)
+)
+
+```
+➡️ This table shows the share of positive revisions by decade. The 1990s had the highest proportion of ***upward revisions (0.692)***, while the 1970s and 2020s had the lowest.
+
+```{r}
+library(ggplot2)
+
+ggplot(ces_all, aes(date, revision)) +
+  geom_line(color = "steelblue") +
+  labs(title = "CES Revision Over Time",
+       y = "Revision (final - original)",
+       x = "Year")
+
+```
+➡️ This plot shows how CES employment figures have been revised over time, with most revisions small but occasional large adjustments ***especially during periods like early 2020***.
+
+***Relative Revision Table***
+
+```{r}
+
+relative_revision <- ces_all |>
+  mutate(relative = round(abs(revision) / final, 3)) |>
+  select(date, relative)
+
+datatable(
+  relative_revision,
+  caption = "Relative Revision: |revision| / final",
+  options = list(pageLength = 10, autoWidth = TRUE)
+)
+
+```
+➡️ This table highlight that the size of relative revisions varies considerably across months
+
+***Revision as % of Total Employment Level (revision / level x 100)***
+
+```{r}
+percent_level <- ces_all |>
+  mutate(percent_level = round(abs(revision) / level * 100, 3)) |>
+  select(date, percent_level)
+
+datatable(percent_level, caption = "Revision as % of Employment")
+
+  options = list(pageLength = 10, autoWidth = TRUE)
+
+
+```
+
+➡️ This table indicate that revisions are generally ***very small relative*** to the overall employment level.
+
+
+***Montly Revision Patterns***
+
+```{r}
+
+monthly_rev <- ces_all |>
+  mutate(month = month(date, label = TRUE)) |>
+  group_by(month) |>
+  summarise(avg_revision = round(mean(revision, na.rm = TRUE), 3))
+
+
+datatable(
+  monthly_rev,
+  caption = "Average Revision by Month",
+  options = list(pageLength = 10, autoWidth = TRUE)
+)
+
+```
+➡️ It tends to have larger positive revisions, while months like March and October show average downward revisions.
+
+
+
+***Monthly Revision Boxplot***
+```{r}
+ggplot(ces_all |> mutate(month = month(date, label = TRUE)),
+       aes(month, revision)) +
+  geom_boxplot(fill = "skyblue") +
+  labs(title = "Monthly Revision Patterns",
+       x = "Month",
+       y = "Revision")
+
+```
+
+
+***Relative Revision Magnitude***
+
+```{r}
+ggplot(ces_all, aes(date, abs(revision) / final)) +
+  geom_line(color = "firebrick") +
+  labs(title = "Relative Revision Magnitude (|rev| / final)",
+       y = "Relative Size",
+       x = "Year")
+```
+
+***Distribution of Absolute Revisions***
+
+```{r}
+ggplot(ces_all, aes(abs(revision))) +
+  geom_histogram(fill = "darkgreen", bins = 40) +
+  labs(title = "Distribution of Absolute Revisions",
+       x = "Absolute Revision")
+```
+
+## Statistical Analysis
+
+**1. Has the fraction of negative revisions increased post-2000?**
+
+```{r}
+library(infer)
+library(DT)
+library(dplyr)
+
+t_test_result <- ces_all |>
+  t_test(response = revision, mu = 0) |>
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+datatable(
+  t_test_result,
+  caption = "One-Sample t-test" ,
+  options = list(pageLength = 5, autoWidth = TRUE)
+)
+
+```
+
+- The p-value is less than 0.05, therefore the test is **statistically significant**.
+
+- The estimate 11.498 suggests that the mean difference is significantly greater than zero.
+
+- This indicates that something increased after 2000 but we should be carfule : This is **NOT** testing whether the fraction of negative revisions increased. It is testing the mean of a numeric variable. 
+
+
+**2. Did the fraction of negative revisions increase after 2000?**
+
+```{r}
+
+ces_prop <- ces_all |>
+  mutate(
+    post2000 = year(date) >= 2000,
+    is_negative = revision < 0
+  )
+         
+prop_test_result <- ces_prop |>
+  prop_test(is_negative ~ post2000, 
+            order = c("FALSE", "TRUE")) |>
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+datatable(
+  prop_test_result,
+  caption = "Proportion Test",
+  options = list(pageLength = 5, autoWidth = TRUE)
+)
+
+
+```
+
+- The p-value is bigger than 0.05, therefore the test is **not statistically significant**.
+
+- The confidence interval includes zero (-0.122 to 0.049), meaning: 
+  - It is possible that the fraction increased
+  
+  - It is possible that it decreased
+  
+  - There is no evidence of any real difference 
+  
+- The observed difference could easily be due to random variation rather than a real change in the behavior of BLS revisions.
+
+
+## Fact Check BLS Revisions 
+
+
+### **Claim 1**
+
+>"No one can be that wrong? We need accurate Job Numbers. I have directed my Team to fire this Biden Political Appointee, IMMEDIATELY" by President Daonald Trump
+
+
+### Hypothesis Test 
+
+**Test Used: One-sample t-test**
+
+**Purpose:**
+
+To evaluate whether CES revisions are so large that they could justify concerns about severe inaccuracy.
+
+```{r}
+
+ces_all |>
+  t_test(response = revision, mu = 0)
+
+
+```
+The p-value is **less than 0.05 (0.01)**. It means it is **statistically significant**.  
+
+```{r}
+library(dplyr)
+library(DT)
+
+stats_claimA <- ces_all |>
+  summarise(
+    mean_revision      = round(mean(revision), 3),
+    mean_abs_revision  = round(mean(abs(revision)), 3),
+    pct_of_level       = round(mean(abs(revision) / level * 100), 3)
+  )
+
+datatable(
+  stats_claimA,
+  caption = "BLS Revisions Accuracy",
+  options = list(
+    pageLength = 5,
+    autoWidth = TRUE
+  )
+)
+
+```
+
+- The average revision is about **+11 jobs**, essentially zero relative to the national employment level (>150 million).
+
+- The average absolute revision is only **56.9 jobs**, which is tiny in the context of the labor market.
+
+- Most importantly, revisions represent just 0.048% of total employment which is less than **5 hundredths of one percent**.
+
+👉 These magnitudes are far too small to support the claim that BLS is **“extremely wrong.”**
+
+
+```{r}
+ces_all |>
+  mutate(rev_pct = abs(revision) / level * 100) |>
+  ggplot(aes(x = date, y = rev_pct)) +
+  geom_line(color = "firebrick") +
+  labs(
+    title = "Revision as Percentage of Employment Level (1979–2025)",
+    x = "Year",
+    y = "Revision (% of Level)"
+  ) +
+  theme_minimal()
+
+```
+
+- The revision percentage is consistently close to **0%**, with only a few spikes during recessions or crises.
+
+- There is no pattern of large or persistent errors, and the series is overwhelmingly stable across **45 years**.
+
+- The recent period (2020–2025) does show volatility primarily due to COVID-19 disruptions. But even then, revisions remain a very small fraction of the total employment level.
+
+
+
+### **Claim 2**
+
+>“Today’s massive downward revision gives the American people even more reason to doubt the integrity of data being published by BLS." by Labor Secretary Chavez DeRemer
+
+### Hypothesis Test
+
+**Test Used: Two-sample t-test**
+
+**Purpose:**
+
+To evaluate whether downward revisions have truly become unusually large in recent years.
+
+```{r}
+
+ces_all |>
+  mutate(post2020 = year(date) >= 2020) |>
+  filter(revision < 0) |>
+  mutate(abs_rev = abs(revision)) |>
+  t_test(abs_rev ~ post2020, order = c("FALSE", "TRUE"))
+
+
+```
+
+The two-sample t-test comparing before 2020 and after 2020 downward revisions produced a p-value of 0.105, which exceeds the 5% threshold. Therefore the difference in average downward revision magnitudes is **not statistically significant**.
+
+```{r}
+library(ggplot2)
+
+ces_all |>
+  filter(revision < 0) |>
+  ggplot(aes(x = revision)) +
+  geom_histogram(binwidth = 20, fill = "firebrick", color = "white", alpha = 0.8) +
+  labs(
+    title = "Distribution of Downward Revisions (1979–2025)",
+    x = "Downward Revision (jobs)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+- Most downward revisions are relatively small, and extreme downward adjustments are rare outliers (during covid) rather than common events. The distribution provides no evidence of widespread or increasing inaccuracy in BLS reporting.
+
+
+### 🔎 Final Verdict: Mostly False
+
+Overall, the statistical evidence demonstrates no support for the claims that recent CES revisions reflect systemic inaccuracy or compromised data integrity at BLS. Both claims exaggerate isolated montly adjustments and are inconsistent with long-run historical patterns. 
+
+
+## Conclusion 
+
+Across the analysis, I conclude that CES revisions remain small, stable, and consistent with long standing statistical patterns. Most revisions fall within a narrow range near zero, and although a few large downward adjustments exist, these events are rare outliers tied to major economic disruptions rather than evidence of systemic inaccuracy. Statistical tests further show no significant increase in either the magnitude or frequency of negative revisions after 2000 or 2020, indicating that BLS methods have not deteriorated and that revision behavior has not fundamentally changed over time. 
+
+The findings contradict recent political claims suggesting that "massive" downward revisions refelct declining data integrity at BLS. While individual months may experience unusually large revisions, the broader historical record shows no pattern of worsening accuracy or systematic bias. In conclusion, ***CES remains a reliable and transparent data, and isolated anomalies should not be mistaken for evidence of a broader failure in the agency's reporting.*** 
