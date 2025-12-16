@@ -18,7 +18,12 @@ execute:
 ## Introduction 
 
 ![](https://images.ctfassets.net/p6ae3zqfb1e3/7LOLTKX5BjrWoEPLMRehzL/eb426c6ae1fb0a29120dc932bafa54e8/Citi_Bike_Plans_pricing_Hero_3x.jpg)
-Citi Bike is the one of the major transportation system in New York City. In this project, I analyzed how rider type affect on ridership and how these differences can be used to improve urban mobility planning. 
+
+Citi Bike is the one of the major transportation system in New York City. In a city known for heavy traffic and limited road space, bike-sharing provides a convenient, affordable, and environmentally friendly alternative to cars and public transit. As a result, Citi Bike is widely used by both residents and visitors for a variety of purposes, including commuting, short errands, and leisure. 
+
+While Citi Bike usage continues to grow, riders do not all use the system in the same way. Citi Bike users are divided into two groups: casual riders and members. These two rider types have differrent travel needs, motivations and usage pattern. Understanding how their differs is important for evaluating how well the system serves different users and how it can be enhanced.
+
+In this project, I analyzed how rider type affect on ridership and how these differences can be used to improve urban mobility planning. 
 
 ## Data Acquisition
 I used and selected Citi Bike data covering from October 2024 to October 2025. 
