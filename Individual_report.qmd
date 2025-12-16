@@ -1,0 +1,192 @@
+---
+title: "Individual Report"
+author: "Jimin Hong"
+date: "`r Sys.Date()`"
+format:
+  html:
+    theme: default
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+  echo: true
+---
+## Introduction 
+
+![](https://images.ctfassets.net/p6ae3zqfb1e3/7LOLTKX5BjrWoEPLMRehzL/eb426c6ae1fb0a29120dc932bafa54e8/Citi_Bike_Plans_pricing_Hero_3x.jpg)
+Citi Bike is the one of the major transportation system in New York City. In this project, I analyzed how rider type affect on ridership and how these differences can be used to improve urban mobility planning. 
+
+## Data Acquisition
+I used and selected Citi Bike data covering from October 2024 to October 2025. 
+
+I obtained Citi Bike trip data from the official Citi Bike site. `https://citibikenyc.com/system-data` 
+The dataset includes montly trip record.
+
+Data acquisiton and integration were performed using the **tidyverse**. I used `list.files()` to identify all montly Citi Bike trip data csv files
+and `purrr:map_dfr()` to read and row bind each file into a single merged dataset (`citibike_all`) for analysis.
+
+
+```{r}
+library(tidyverse)
+
+files <- list.files(
+  "data/Course project",
+  pattern = "citibike",
+  full.names = TRUE
+)
+
+# Merge the files 
+files   
+citibike_all <- map_dfr(files, read_csv)
+
+
+glimpse(citibike_all)
+
+```
+
+The final dataset includes **1,244,381** Citi Bike trips and **13** columns, covering the period from October 2024 through October 2025.
+
+## Data visualization 
+
+**1. Duration gap between casual vs member**
+
+I examine the duration gap between casual riders and members to understand how usage behavior differs across rider types.
+
+Using **tidyverse** packages,including `dplyr`, `lubridate`,`tidyr`, and `ggplot2` 
+
+First, I converted star and end timestapms to datetime format and computing trip duration in minutes. then I extracted temporal features, including hour of day and day of week, to capture time-based usage pattern.
+
+Next, I calculated average trip duraton by ridr type (casual vs member), hour of day, and day of week. 
+
+Finally, I computed the duration gap as difference in average trip duration between casual and member riders and visualize using a heatmap. 
+
+```{r}
+
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tidyr)
+
+df <- citibike_all
+
+# Preprocess: duration + hour/day
+df <- df %>%
+  mutate(
+    started_at = ymd_hms(started_at),
+    ended_at   = ymd_hms(ended_at),
+    ride_duration_min = as.numeric(difftime(ended_at, started_at, units = "mins")),
+    hour = hour(started_at),
+    dow  = wday(started_at, label = TRUE, abbr = TRUE)
+  )
+
+# Average duration
+avg_duration <- df %>%
+  group_by(member_casual, dow, hour) %>%
+  summarise(
+    avg_duration = mean(ride_duration_min, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+
+duration_wide <- avg_duration %>%
+  pivot_wider(
+    names_from = member_casual,
+    values_from = avg_duration
+  )
+
+# Duration gap
+gap_df <- duration_wide %>%
+  mutate(duration_gap = casual - member)
+
+# Heatmap
+ggplot(gap_df, aes(x = hour, y = dow, fill = duration_gap)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(
+    option = "magma",
+    direction = -1,
+    name = "Duration Gap\n(casual - member)"
+  ) +
+  labs(
+    title = "Duration Gap Between Casual and Member Riders",
+    subtitle = "Higher values indicate longer trips by casual riders",
+    x = "Hour of Day",
+    y = "Day of Week"
+  ) +
+  theme_minimal(base_size = 15)
+
+
+```
+
+The heatmap shows a clear duration gap between casual riders and annual members across both time of day and day of week. Almost all periods, casual riders have longer average trip durations than members, suggesting different usage patterns.
+
+The gap is smallest during weekday morning hours, which likely reflects commuting behavior shared by both rider types. In contrast, the gap becomes larger in the afternoon and evening, and is most pronounced on weekends, indicating that casual riders tend to use Citi Bike for longer, more recreational trips during these times
+
+
+
+**2. Monthly Trip Volume** 
+
+To analyze montly citi bike usage pattern, I used `dplyr` and `ggplot2` package. 
+
+I aggregated trip level data to the montly level by extracting the year-month from the trip start timestamp. For each month and rider type (casual vs member), total trip counts were computed to summarize overall usage volume. 
+
+I created bar a grouped bar chart to compare montly trip counts between casual riders and members. This chart makes it easy to see differences in usage patterns across rider types and shows clear seasonal changes in Citi Bike usage. 
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# 1. Create monthly aggregated data
+monthly_volume <- df %>%
+  mutate(month = format(as.Date(started_at), "%Y-%m")) %>%
+  group_by(month, member_casual) %>%
+  summarise(trip_count = n(), .groups = "drop")
+
+# 2. Keep only data from October 2024 onward
+monthly_volume <- monthly_volume %>%
+  filter(month >= "2024-10")
+
+# 3. Order the month factor properly
+monthly_volume$month <- factor(
+  monthly_volume$month,
+  levels = sort(unique(monthly_volume$month))
+)
+
+# 4. Minimal clean version (no background)
+ggplot(monthly_volume, aes(x = month, y = trip_count, fill = member_casual)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Monthly Trip Volume by Rider Type",
+    x = "Month",
+    y = "Trip Count",
+    fill = "Rider Type"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right",
+    plot.title = element_text(size = 16, face = "bold")
+  )
+
+
+```
+
+The bar chart shows monthly Citi Bike trip volume by rider type from October 2024 to October 2025. Across all months, annual members consistently account for a larger share of trips than casual riders, highlighting the role of Citi Bike as a regular transportation option for many users.
+
+At the same time, strong seasonal patterns are evident. Trip volume declines sharply during the winter months and increases steadily in the spring, reaching a peak in the summer. This seasonal effect is particularly pronounced among casual riders, whose usage rises sharply during warmer months, suggesting greater recreational and tourist-driven demand. Conversely, member usage remains relatively stable throughout the year, reflecting more routine commuting behavior.
+
+
+
+## Conclusion 
+
+Based on my analysis, the results show clear behavioral differences between the two groups. Causal riders tend to take longer trips, especially during weekends and non-commute hours, while members show more consistent and shorter trip throughout the week. 
+
+One of the main finding is a strong seasonal patterns in Citi Bike usage. Overall trip volume increases during warmer months, with casual ridership driving much of the summer peak. While, member usage remains relatively stable across the year, suggesting that members primarily use Citi Bike for regular transportation needs. 
+
+These insights suggest that rider type plays an important role in shaping usage patterns and should be considered in future planning and policy decisions. 
+
+
