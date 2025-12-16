@@ -180,6 +180,9 @@ The bar chart shows monthly Citi Bike trip volume by rider type from October 202
 At the same time, strong seasonal patterns are evident. Trip volume declines sharply during the winter months and increases steadily in the spring, reaching a peak in the summer. This seasonal effect is particularly pronounced among casual riders, whose usage rises sharply during warmer months, suggesting greater recreational and tourist-driven demand. Conversely, member usage remains relatively stable throughout the year, reflecting more routine commuting behavior.
 
 
+## Limitation 
+
+This study has several limitations. First, the anaylsis relies on obervational data, which prevents causal intepretation of differences between causal and member riders. Second, while strong seasonal patterns are evident, detatiled weather conditions were not explicitly include in the analysis. In addition, the dataset does not caputre trip purpose, requiring behavioral differences to be inferred from duration and timing. Finally, the analysis is limted to a one-year period and may not refelct longer-term trends in Citi Bike usage. 
 
 ## Conclusion 
 
@@ -188,5 +191,4 @@ Based on my analysis, the results show clear behavioral differences between the 
 One of the main finding is a strong seasonal patterns in Citi Bike usage. Overall trip volume increases during warmer months, with casual ridership driving much of the summer peak. While, member usage remains relatively stable across the year, suggesting that members primarily use Citi Bike for regular transportation needs. 
 
 These insights suggest that rider type plays an important role in shaping usage patterns and should be considered in future planning and policy decisions. 
-
 
