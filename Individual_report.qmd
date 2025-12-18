@@ -25,6 +25,17 @@ While Citi Bike usage continues to grow, riders do not all use the system in the
 
 In this project, I analyzed how rider type affect on ridership and how these differences can be used to improve urban mobility planning. 
 
+
+
+## SQ.How does rider type influence both demand and riding patterns? 
+
+Our overarching question of this analysis investigate how multiple factors -including weather, time, location, bike lane infrastructure, and rider type - affect Citi Bike trip volume in Manhattan. We capture the complexity of urban transportation and recognizes that ridership is shaped by both environmental and customer behavior factors. 
+
+Specifically, rider type emerges as a particularly important dimension because it reflects fundamental differences in user intent and usage differences. Casual riders and members show different pricing structures, travel needs and usage motivations, which may affect not only how often they ride but also how they use the system. 
+
+With this reason, I focused on the specific questions of how rider type influences both demand and riding pattern. By narrowing the scope from the overarching question to rider type, my sub question allows for a deeper analysis of behavioral differences. 
+
+
 ## Data Acquisition
 I used and selected Citi Bike data covering from October 2024 to October 2025. 
 
@@ -54,6 +65,7 @@ glimpse(citibike_all)
 ```
 
 The final dataset includes **1,244,381** Citi Bike trips and **13** columns, covering the period from October 2024 through October 2025.
+
 
 ## Data visualization 
 
